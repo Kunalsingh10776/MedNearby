@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Last‑Mile Medicine Access</title>
+
+  <!-- Tailwind CSS CDN (minimal) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS (free OSM maps) -->
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-sA+gZEq6KV3hCM1Sqf6036pXeE/9IexnAUjZ6waJQy4="
+        crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o8cCwuZb83+FRFu1IsNYFh2Ub2pNzQ9c9aMjq76CVauto="
+    crossorigin=""></script>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+  <style>
+    :root {
+      --slate-navy: #0F172A;
+      --medical-cyan: #0EA5E9;
+      --emerald: #10B981;
+      --amber: #F59E0B;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--slate-navy);
+      color: #E2E8F0;
+    }
+    .bg-card {
+      background: rgba(30,64,175,0.35);
+      backdrop-filter: blur(8px);
+      border-radius: 12px;
+    }
+.badge {
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .badge-green { background:#D1F2EB; color:#0F766E; }
+    .badge-yellow { background:#FFFBEB; color:#D97706; }
+    .badge-red { background:#FECACA; color:#DC2626; }
+    .badge-gray { background:#F1F5F9; color:#64748B; }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--medical-cyan); color:#0F172A; }
+    .btn-secondary { background:#334155; color:#E2E8F0; }
+    .nav-btn {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      display:flex; align-items:center; justify-content:center;
+    }
+.leafmap { height: 300px; width:100%; border-radius: 12px; overflow:hidden; }
+    /* ---- small helpers ---- */
+    .hidden { display: none !important; }
+    .low-band body {
+      filter: brightness(0.8);
+      /* optional: reduce image size, etc. */
+    }
+    .filter-btn.tiny { padding: 4px 8px; font-size: 0.78rem; }
+  </style>
+</head>
+<body class="p-4 md:p-6 min-h-screen">
+
+  <!-- ========== Header ========== -->
+  <header class="mb-6 flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-2">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M16 2L2 7l14 5 5-14 10 10-14 5L16 2z"/>
+        <circle cx="16" cy="16" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      </svg>
+      <h1 class="text-xl font-semibold">Last‑Mile Medicine</h1>
+    </div>
+<div class="flex items-center gap-2">
+      <button id="lowBandBtn" class="btn btn-secondary px-3 py-1 rounded">Low‑Bandwidth</button>
+      <button id="smsSimBtn" class="btn btn-secondary px-3 py-1 rounded">SMS Search</button>
+    </div>
+  </header>
+
+  <!-- ========== Search Bar ========== -->
+  <section class="mb-4">
+    <div class="relative">
+      <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchMed" type="text"
+             placeholder="Search medicine…"
+             class="w-full pl-9 py-2 border border-gray-700 rounded bg-gray-900 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-medical-cyan"/>
+    </div>
+  </section>
+<!-- ========== Filters ========== -->
+  <section class="mb-4 flex flex-wrap gap-2">
+    <button class="btn btn-secondary tiny filter-btn" data-filter="all">All</button>
+    <button class="btn btn-secondary tiny filter-btn" data-filter="instock">In Stock Only</button>
+    <button class="btn btn-secondary tiny filter-btn" data-filter="open">Open Now</button>
+    <button class="btn btn-secondary tiny filter-btn" data-filter="verified">Verified</button>
+    <input type="range" id="distSlider" min="0" max="10" step="1" value="5"
+      class="w-24 accent-color medical-cyan"> 
+    <span id="distVal">5 km</span>
+  </section>
+
+  <!-- ========== Pharmacies List ========== -->
+  <section id="pharmList" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <!-- Cards are injected by JavaScript -->
+  </section>
+<!-- ========== Reservation Modal ========== -->
+  <div id="reserveModal" class="fixed inset-0 hidden items-center justify-center bg-black/60 backdrop-blur-sm z-50">
+    <div class="bg-card p-6 rounded-xl max-w-md w-full text-center">
+      <h2 class="text-xl font-bold mb-2">Reserve for 30 min</h2>
+      <p id="reserveInfo" class="text-sm text-gray-400 mb-4"></p>
+      <div class="flex justify-center items-center gap-4">
+        <button id="navMapBtn" class="btn btn-primary flex-1">Open map</button>
+        <button id="callPharmBtn" class="btn btn-secondary flex-1">Call pharmacy</button>
+      </div>
+      <div class="mt-4">
+        <span id="countdown" class="text-2xl font-bold"></span> mins left
+      </div>
+      <button id="closeModal" class="btn btn-secondary w-full mt-4">Close</button>
+    </div>
+  </div>
+<!-- ========== Bottom Nav (mobile) ========== -->
+  <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 bg-gray-900/90 backdrop-blur-sm p-1 justify-around z-40">
+    <button class="nav-btn" aria-label="Home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></button>
+    <button class="nav-btn" aria-label="Search"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg></button>
+    <button class="nav-btn" aria-label="Favorites"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 3v4h14V3H5zm2 6h10a2 2 0 012 2v8a2 2 0 01-2 2H7a2 2 0 01-2-2v-8a2 2 0 012-2zm4-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg></button>
+    <button class="nav-btn" aria-label="Verify"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="22 11 18 15 12 21 6 15 2 11"/><polyline points="22 2 15 2 12 5 9 5 6 2"/></svg></button>
+  </nav>
+<!-- ====================  JavaScript (all logic) ==================== -->
+  <script>
+    /* --------------------------------------------------------------
+       DEMO DATA – pre‑seeded pharmacies & medicines
+       -------------------------------------------------------------- */
+    const essentialMeds = [
+      'Paracetamol 650mg',
+      'ORS Sachet',
+      'Azithromycin 500mg',
+      'Regular Insulin 100IU',
+      'Cetirizine 10mg',
+      'Metformin 500mg'
+    ];
+
+    // lat/lng are approximate Bengaluru locations; distKm is the simulated distance from centre.
+    const pharmacies = [
+      {
+id: 1,
+        name: 'City Health Medicals',
+        lat: 12.9716, lng: 77.5946,
+        address: '123 MG Road, Bengaluru',
+        distKm: 0.8,
+        trust: 5,
+        openNow: true,
+        stock: {
+          'Paracetamol 650mg': '🟢',
+          'ORS Sachet': '🟡',
+          'Azithromycin 500mg': '🔴',
+          'Regular Insulin 100IU': '🟢',
+          'Cetirizine 10mg': '🟢',
+          'Metformin 500mg': '🟡'
+        }
+      },
+      {
+        id: 2,
+        name: 'Apex Care Pharma',
+        lat: 12.9730, lng: 77.5960,
+        address: '45 Brigade Road, Bengaluru',
+        distKm: 1.4,
+        trust: 4,
+openNow: true,
+        stock: {
+          'Paracetamol 650mg': '🟢',
+          'ORS Sachet': '🟢',
+          'Azithromycin 500mg': '🟢',
+          'Regular Insulin 100IU': '🟡',
+          'Cetirizine 10mg': '🟢',
+          'Metformin 500mg': '🟢'
+        }
+      },
+      {
+        id: 3,
+        name: 'Standard Chemist',
+        lat: 12.9750, lng: 77.5990,
+        address: '78 Church Street, Bengaluru',
+        distKm: 3.2,
+        trust: 3,
+        openNow: false,
+        stock: {
+'Paracetamol 650mg': '🟢',
+          'ORS Sachet': '🔴',
+          'Azithromycin 500mg': '🟢',
+          'Regular Insulin 100IU': '🟢',
+          'Cetirizine 10mg': '🟡',
+          'Metformin 500mg': '🟡'
+        }
+      }
+    ];
+
+    /* --------------------------------------------------------------
+       HELPERS
+       -------------------------------------------------------------- */
+    function kmToTime(km) {
+      return km < 2 ? `${km} km (~5 min walk)` : `${km} km (~${12 * km} min drive)`;
+    }
+function badgeClass(status) {
+      if (/🟢/.test(status)) return 'badge-green';
+      if (/🟡/.test(status)) return 'badge-yellow';
+      if (/🔴/.test(status)) return 'badge-red';
+      return 'badge-gray';
+    }
+
+    function renderStockBadges(stock) {
+      const container = document.createElement('div');
+      container.className = 'grid grid-cols-6 gap-1 text-xs';
+      essentialMeds.forEach(m => {
+        const emoji = stock[m] || '⚪';
+        const b = document.createElement('span');
+        b.className = `badge ${badgeClass(emoji)}`;
+        b.title = m + ' – ' + emoji;
+        b.textContent = emoji;
+        container.appendChild(b);
+      });
+      return container;
+    }
+/* --------------------------------------------------------------
+       FILTER & SORT logic
+       -------------------------------------------------------------- */
+    function applyFilters(searchTerm, distKm, instockOnly, openOnly, verifiedOnly) {
+      const term = (searchTerm || '').trim().toLowerCase();
+      const maxDist = parseInt(distKm, 10);
+      const html = [];
+
+      pharmacies.forEach(p => {
+        const isVerified = p.trust > 3;
+
+        // --- Open Now -------------------------------------------------
+        if (openOnly && !p.openNow) return;
+
+        // --- Distance -------------------------------------------------
+if (p.distKm > maxDist) return;
+
+        // --- Search term (fuzzy on name/address) -----------------------
+        if (term) {
+          const nameMatch = p.name.toLowerCase().includes(term) || p.address.toLowerCase().includes(term);
+          // a very simple “any medicine has a badge” check
+          const anyBadge = Object.values(p.stock).some(v => /🟢|🟡|🔴/.test(v));
+          if (!nameMatch && !anyBadge) return;   // skip this pharmacy
+        }
+
+        // --- Verified flag ---------------------------------------------
+        if (verifiedOnly && !isVerified) return;
+
+        // --- In‑stock only ---------------------------------------------
+        if (instockOnly) {
+          const hasGreen = Object.values(p.stock).some(v => /🟢/.test(v));
+if (!hasGreen) return;
+        }
+
+        // --- Build the card HTML ---------------------------------------
+        const badgeHtml = renderStockBadges(p.stock).outerHTML;
+        const card = `
+          <article class="bg-card p-4 rounded-xl hover:shadow-lg transition-shadow" style="max-width:260px;">
+            <header class="flex justify-between items-start">
+              <h3 class="font-medium">${p.name}</h3>
+              <span class="text-xs text-gray-400">${kmToTime(p.distKm)}</span>
+            </header>
+            <p class="text-sm text-gray-400 line-clamp-2 mt-1">${p.address}</p>
+            <div class="mt-3">${badgeHtml}</div>
+            <div class="mt-2 flex justify-between text-xs text-gray-400">
+              <span>Trust: ★${p.trust}/5</span>
+              <span>${p.openNow ? '🟢 Open' : '🔴 Closed'}</span>
+            </div>
+<button class="btn btn-primary w-full mt-2 reserveBtn"
+                    data-id="${p.id}"
+                    data-name="${p.name}"
+                    data-lat="${p.lat}"
+                    data-lng="${p.lng}">
+              Reserve for 30 min
+            </button>
+            <button class="btn btn-secondary w-full mt-1 verifyBtn"
+                    data-id="${p.id}"
+                    data-name="${p.name}">
+              Confirm Available / Report Out‑of‑Stock
+            </button>
+          </article>`;
+        html.push(card);
+      });
+
+      // --- Show “no results” if nothing matched -----------------------
+      document.getElementById('pharmList').innerHTML = html.join('') || `
+        <p class="text-center text-gray-400 py-8">No pharmacies match your criteria.</p>`;
+// re‑attach event listeners after DOM update
+      attachReserveListeners();
+      attachVerifyListeners();
+    }
+
+    /* --------------------------------------------------------------
+       RESERVE 30‑MINUTE MODAL
+       -------------------------------------------------------------- */
+    function showReserveModal(p) {
+      const now = Date.now();
+      const end = now + 30 * 60 * 1000;               // 30 min from now
+      const roughDist = Math.hypot(p.lat - 12.9716, p.lng - 77.5946) * 111; // rough km
+
+      document.getElementById('reserveInfo').textContent = `${p.name} (≈${roughDist.toFixed(1)} km away)`;
+      document.getElementById('countdown').textContent = '30';
+
+      // countdown timer – updates every 30 s for simplicity
+      const interval = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((end - Date.now()) / 60000));document.getElementById('countdown').textContent = remaining;
+        if (remaining === 0) {
+          clearInterval(interval);
+          alert('Reservation time expired – please collect your medicine.');
+          hideReserveModal();
+        }
+      }, 30000);
+
+      // “Open map” button → OpenStreetMap centre on the pharmacy
+      const mapLink = `https://www.openstreetmap.org/#map=15/${p.lat}/${p.lng}`;
+      document.getElementById('navMapBtn').onclick = () => window.open(mapLink, '_blank');
+
+      // “Call pharmacy” button (tel:)
+      document.getElementById('callPharmBtn').onclick = () => window.location = `tel:+91-80-12345678`;
+
+      document.getElementById('reserveModal').classList.remove('hidden');
+    }
+function hideReserveModal() {
+      document.getElementById('reserveModal').classList.add('hidden');
+    }
+
+    function attachReserveListeners() {
+      document.querySelectorAll('.reserveBtn').forEach(btn => {
+        btn.onclick = () => showReserveModal({
+          id: Number(btn.dataset.id),
+          name: btn.dataset.name,
+          lat: parseFloat(btn.dataset.lat),
+          lng: parseFloat(btn.dataset.lng)
+        });
+      });
+    }
+
+    /* --------------------------------------------------------------
+       COMMUNITY VERIFICATION
+       -------------------------------------------------------------- */
+function attachVerifyListeners() {
+      document.querySelectorAll('.verifyBtn').forEach(btn => {
+        btn.onclick = () => {
+          const id = Number(btn.dataset.id);
+          const pharm = pharmacies.find(p => p.id === id);
+          if (!pharm) return;
+
+          // toggle trust score (1‑5) and button text
+          if (btn.textContent.includes('Confirm')) {
+            pharm.trust = Math.min(5, pharm.trust + 1);
+            btn.textContent = `Report Out‑of‑Stock ★${pharm.trust}/5`;
+            btn.classList.add('bg-emerald-600', 'text-white');
+            btn.classList.remove('btn-secondary');
+          } else {
+            pharm.trust = Math.max(0, pharm.trust - 1);
+            btn.textContent = `Confirm Available ★${pharm.trust}/5`;
+            btn.classList.add('btn-secondary');
+            btn.classList.remove('bg-emerald-600', 'text-white');
+          }
+          // re‑render the whole list so the new trust score is visible
+applyFilters(
+            document.getElementById('searchMed').value,
+            document.getElementById('distSlider').value,
+            false,
+            false,
+            false
+          );
+        };
+      });
+    }
+
+    /* --------------------------------------------------------------
+       LOW‑BANDWIDTH TOGGLE
+       -------------------------------------------------------------- */
+    document.getElementById('lowBandBtn').onclick = () => {
+      document.body.classList.toggle('low-band');
+      document.getElementById('lowBandBtn').textContent =
+        document.body.classList.contains('low-band') ? 'High‑Bandwidth' : 'Low‑Bandwidth';
+    };
+/* --------------------------------------------------------------
+       SMS SEARCH SIMULATION
+       -------------------------------------------------------------- */
+    document.getElementById('smsSimBtn').onclick = () => {
+      const med = (document.getElementById('searchMed').value || '').trim();
+      const text = `FIND ${med} 560001`;   // placeholder pincode
+      alert(`SMS ready: “${text}” → send to +91‑XXXXX`);
+    };
+
+    /* --------------------------------------------------------------
+       DISTANCE SLIDER → re‑run filters
+       -------------------------------------------------------------- */
+    document.getElementById('distSlider').oninput = (e) => {
+      document.getElementById('distVal').textContent = `${e.target.value} km`;
+      applyFilters(
+        document.getElementById('searchMed').value,
+        e.target.value,
+
+false,
+        false,
+        false
+      );
+    };
+
+    /* --------------------------------------------------------------
+       SEARCH input – debounce (150 ms)
+       -------------------------------------------------------------- */
+    let searchTimeout;
+    document.getElementById('searchMed').oninput = (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() =>
+        applyFilters(e.target.value, 5, false, false, false), 150);
+    };
+
+    /* --------------------------------------------------------------
+       FILTER BUTTONS (quick toggles)
+       -------------------------------------------------------------- */
+document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.onclick = () => {
+        const filter = btn.dataset.filter; // all / instock / open / verified
+        const term = document.getElementById('searchMed').value;
+        const dist = document.getElementById('distSlider').value;
+
+        let instockOnly = false, openOnly = false, verifiedOnly = false;
+
+        if (filter === 'instock') instockOnly = true;
+        if (filter === 'open') openOnly = true;
+        if (filter === 'verified') verifiedOnly = true;
+
+        applyFilters(term, dist, instockOnly, openOnly, verifiedOnly);
+      };
+    });
+
+    /* --------------------------------------------------------------
+       INITIAL RENDER
+       -------------------------------------------------------------- */
+    // Initial call – no filters
+    applyFilters('', 5, false, false, false);
+  </script>
+</body>
+</html>
